@@ -1,4 +1,5 @@
 import csv
+from enum import Enum
 from datetime import datetime
 import os
 from types import SimpleNamespace
@@ -16,8 +17,14 @@ from bfcl_eval.constants.eval_config import (
 )
 from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING
 from bfcl_eval.eval_checker.eval_runner import main as evaluation_main
+from bfcl_eval.utils import create_files_subpath
 from dotenv import load_dotenv
 from tabulate import tabulate
+
+
+class Language(str, Enum):
+    english = "en"
+    arabic = "ar"
 
 
 class ExecutionOrderGroup(typer.core.TyperGroup):
@@ -119,7 +126,7 @@ def generate(
         help="Exclude info about the state of each API system after each turn in the inference log; only relevant for multi-turn categories.",
     ),
     num_gpus: int = typer.Option(1, help="The number of GPUs to use."),
-    num_threads: Optional[int] = typer.Option(None, help="The number of threads to use."),
+    num_threads: int = typer.Option(1, help="The number of threads to use."),
     gpu_memory_utilization: float = typer.Option(0.9, help="The GPU memory utilization."),
     backend: str = typer.Option("sglang", help="The backend to use for the model."),
     skip_server_setup: bool = typer.Option(
@@ -133,7 +140,7 @@ def generate(
         help="Specify the path to a local directory containing the model's config/tokenizer/weights for fully offline inference. Use this only if the model weights are stored in a location other than the default HF_HOME directory.",
     ),
     result_dir: str = typer.Option(
-        RESULT_PATH,
+        None,
         "--result-dir",
         help="Path to the folder where output files will be stored; Path should be relative to the `berkeley-function-call-leaderboard` root folder",
     ),
@@ -147,6 +154,36 @@ def generate(
         False,
         "--run-ids",
         help="If true, also run the test entry mentioned in the test_case_ids_to_generate.json file, in addition to the --test_category argument.",
+    ),
+    openai_base_url: str = typer.Option(
+        None,
+        "--openai-base-url",
+        help="Base URL for OpenAI-compatible server.",
+    ),
+    openai_api_key: str = typer.Option(
+        None,
+        "--openai-api-key",
+        help="API key for OpenAI-compatible server.",
+    ),
+    vllm_model_name: str = typer.Option(
+        None,
+        "--vllm-model-name",
+        help="Model name for OpenAI-compatible server.",
+    ),
+    user_prompt_lang: Language = typer.Option(
+        "en",
+        "--user-prompt-lang",
+        help="User prompt language.",
+    ),
+    func_desc_lang: Language = typer.Option(
+        "en",
+        "--func-desc-lang",
+        help="Function description language.",
+    ),
+    func_param_desc_lang: Language = typer.Option(
+        "en",
+        "--func-param-desc-lang",
+        help="Function parameters description language.",
     ),
 ):
     """
@@ -168,6 +205,12 @@ def generate(
         result_dir=result_dir,
         allow_overwrite=allow_overwrite,
         run_ids=run_ids,
+        openai_base_url=openai_base_url,
+        openai_api_key=openai_api_key,
+        vllm_model_name=vllm_model_name,
+        user_prompt_lang=user_prompt_lang, 
+        func_desc_lang=func_desc_lang, 
+        func_param_desc_lang=func_param_desc_lang
     )
     load_dotenv(dotenv_path=DOTENV_PATH, verbose=True, override=True)  # Load the .env file
     generation_main(args)
@@ -251,18 +294,33 @@ def evaluate(
         "--score-dir",
         help="Relative path to the evaluation score folder, if different from the default; Path should be relative to the `berkeley-function-call-leaderboard` root folder",
     ),
-    partial_eval: bool = typer.Option(
-        False,
-        "--partial-eval",
-        help="Run evaluation on a partial set of benchmark entries (eg. entries present in the model result files) without raising for missing IDs.",
+    user_prompt_lang: Language = typer.Option(
+        "en",
+        "--user-prompt-lang",
+        help="User prompt language.",
+    ),
+    func_desc_lang: Language = typer.Option(
+        "en",
+        "--func-desc-lang",
+        help="Function description language.",
+    ),
+    func_param_desc_lang: Language = typer.Option(
+        "en",
+        "--func-param-desc-lang",
+        help="Function parameters description language.",
     ),
 ):
     """
     Evaluate results from run of one or more models on a test-category (same as eval_runner.py).
     """
+    subpath = create_files_subpath(user_prompt_lang, func_desc_lang, func_param_desc_lang,
+                                    os.environ["SYSTEM_PROMPT_LANG"])
+    
+    result_dir = subpath if result_dir is None else result_dir
+    score_dir = subpath if score_dir is None else score_dir
 
     load_dotenv(dotenv_path=DOTENV_PATH, verbose=True, override=True)  # Load the .env file
-    evaluation_main(model, test_category, result_dir, score_dir, partial_eval)
+    evaluation_main(model, test_category, result_dir, score_dir)
 
 
 @cli.command()

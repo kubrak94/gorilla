@@ -9,6 +9,9 @@ from bfcl_eval.constants.category_mapping import *
 from bfcl_eval.constants.default_prompts import (
     ADDITIONAL_SYSTEM_PROMPT_FOR_AGENTIC_RESPONSE_FORMAT,
     DEFAULT_SYSTEM_PROMPT_FORMAT,
+    JAVA_HINT,
+    JAVASCRIPT_HINT,
+    PYTHON_HINT
 )
 from bfcl_eval.constants.eval_config import *
 from bfcl_eval.constants.executable_backend_config import (
@@ -402,6 +405,7 @@ def sort_file_content_by_id(file_path: Path) -> None:
 
 def load_dataset_entry(
     test_category: str,
+    file_subpath: str = "",
     include_prereq: bool = True,
     include_language_specific_hint: bool = True,
 ) -> list[dict]:
@@ -432,10 +436,10 @@ def load_dataset_entry(
     else:
         # All other categories, we don't need any special handling
         file_name = f"{VERSION_PREFIX}_{test_category}.json"
-        all_entries = load_file(PROMPT_PATH / file_name)
+        all_entries = load_file(PROMPT_PATH / file_subpath / file_name)
 
     all_entries = process_agentic_test_case(all_entries)
-    all_entries = populate_test_cases_with_predefined_functions(all_entries)
+    all_entries = populate_test_cases_with_predefined_functions(all_entries, file_subpath)
 
     if include_language_specific_hint:
         all_entries = add_language_specific_hint_to_function_doc(all_entries)
@@ -612,11 +616,11 @@ def is_empty_output(decoded_output):
 
 def _get_language_specific_hint(test_category):
     if test_category == "java":
-        return " Note that the provided function is in Java 8 SDK syntax."
+        return JAVA_HINT["func_desc"][os.environ["FUNC_DESC_LANG"]]
     elif test_category == "javascript":
-        return " Note that the provided function is in JavaScript syntax."
+        return JAVASCRIPT_HINT["func_desc"][os.environ["FUNC_DESC_LANG"]]
     else:
-        return " Note that the provided function is in Python 3 syntax."
+        return PYTHON_HINT["func_desc"][os.environ["FUNC_DESC_LANG"]]
 
 
 def _func_doc_language_specific_pre_processing(
@@ -638,15 +642,16 @@ def _func_doc_language_specific_pre_processing(
                 if value["type"] == "any":
                     properties[key][
                         "description"
-                    ] += " This parameter can be of any type of Java object in string representation."
+                    ] += JAVA_HINT["func_param_desc"]["any_type"][os.environ["FUNC_PARAM_DESC_LANG"]]
                 else:
                     value[
                         "description"
-                    ] += f" This is Java {value['type']} type parameter in string representation."
+                    ] += JAVA_HINT["func_param_desc"]["given_type"][os.environ["FUNC_PARAM_DESC_LANG"]].format(value_type=value["type"])
+
                 if value["type"] == "ArrayList" or value["type"] == "Array":
                     value[
                         "description"
-                    ] += f" The list elements are of type {value['items']['type']}; they are not in string representation."
+                    ] += JAVA_HINT["func_param_desc"]["array_type"][os.environ["FUNC_PARAM_DESC_LANG"]].format(value_type=value["items"]["type"])
                     del value["items"]
 
                 value["type"] = "string"
@@ -656,22 +661,22 @@ def _func_doc_language_specific_pre_processing(
                 if value["type"] == "any":
                     properties[key][
                         "description"
-                    ] += " This parameter can be of any type of JavaScript object in string representation."
+                    ] += JAVASCRIPT_HINT["func_param_desc"]["any_type"][os.environ["FUNC_PARAM_DESC_LANG"]]
                 else:
                     value[
                         "description"
-                    ] += f" This is JavaScript {value['type']} type parameter in string representation."
+                    ] += JAVASCRIPT_HINT["func_param_desc"]["given_type"][os.environ["FUNC_PARAM_DESC_LANG"]].format(value_type=value["type"])
                 if value["type"] == "array":
                     value[
                         "description"
-                    ] += f" The list elements are of type {value['items']['type']}; they are not in string representation."
+                    ] += JAVASCRIPT_HINT["func_param_desc"]["array_type"][os.environ["FUNC_PARAM_DESC_LANG"]].format(value_type=value["items"]["type"])
                     del value["items"]
 
                 if value["type"] == "dict":
                     if "properties" in value:  # not every dict has properties
                         value[
                             "description"
-                        ] += f" The dictionary entries have the following schema; they are not in string representation. {json.dumps(value['properties'])}"
+                        ] += JAVASCRIPT_HINT["func_param_desc"]["dict_type"][os.environ["FUNC_PARAM_DESC_LANG"]].format(json_value=json.dumps(value['properties']))
                         del value["properties"]
 
                 value["type"] = "string"
@@ -761,7 +766,7 @@ def process_agentic_test_case(test_cases: list[dict]) -> list[dict]:
     return test_cases
 
 
-def populate_test_cases_with_predefined_functions(test_cases: list[dict]) -> list[dict]:
+def populate_test_cases_with_predefined_functions(test_cases: list[dict], file_subpath: str = "") -> list[dict]:
     """
     Multi-turn and Agentic test cases don't have the function doc in the prompt. We need to add them here.
     """
@@ -773,7 +778,7 @@ def populate_test_cases_with_predefined_functions(test_cases: list[dict]) -> lis
         for func_collection in involved_classes:
             # func_doc is a list of dict
             func_doc = load_file(
-                MULTI_TURN_FUNC_DOC_PATH / MULTI_TURN_FUNC_DOC_FILE_MAPPING[func_collection]
+                PROMPT_PATH / file_subpath / "multi_turn_func_doc" / MULTI_TURN_FUNC_DOC_FILE_MAPPING[func_collection]
             )
             entry["function"].extend(func_doc)
 
@@ -954,3 +959,20 @@ def get_all_format_sensitivity_configs() -> list[str]:
     )
 
     return all_configs
+
+
+def create_files_subpath(user_prompt_lang, func_desc_lang, func_param_desc_lang,
+                         system_prompt_lang=None, fc_prompt_lang=None):
+    files_subpath = ""
+
+    if system_prompt_lang:
+        files_subpath += f"system_prompt_{system_prompt_lang}/"
+
+    if fc_prompt_lang:
+        files_subpath += f"fc_prompt_{fc_prompt_lang}/"
+
+    files_subpath += f"user_prompt_{user_prompt_lang}/"
+    files_subpath += f"func_desc_{func_desc_lang}/"
+    files_subpath += f"func_param_desc_{func_param_desc_lang}"
+
+    return files_subpath

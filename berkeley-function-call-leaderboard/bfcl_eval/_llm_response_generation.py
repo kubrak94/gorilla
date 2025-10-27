@@ -37,7 +37,7 @@ def get_args():
     parser.add_argument("--temperature", type=float, default=0.001)
     parser.add_argument("--include-input-log", action="store_true", default=False)
     parser.add_argument("--exclude-state-log", action="store_true", default=False)
-    parser.add_argument("--num-threads", required=False, type=int)
+    parser.add_argument("--num-threads", default=1, type=int)
     parser.add_argument("--num-gpus", default=1, type=int)
     parser.add_argument("--backend", default="sglang", type=str, choices=["vllm", "sglang"])
     parser.add_argument("--gpu-memory-utilization", default=0.9, type=float)
@@ -64,16 +64,13 @@ def get_args():
 
 def build_handler(model_name, temperature):
     config = MODEL_CONFIG_MAPPING[model_name]
-    handler = config.model_handler(
-        model_name=config.model_name,
-        temperature=temperature,
-        registry_name=model_name,
-        is_fc_model=config.is_fc_model,
-    )
+    handler = config.model_handler(model_name, temperature)
+    # Propagate config flags to the handler instance
+    handler.is_fc_model = config.is_fc_model
     return handler
 
 
-def get_involved_test_entries(test_category_args, run_ids):
+def get_involved_test_entries(test_category_args, run_ids, file_subpath):
     all_test_categories, all_test_entries_involved = [], []
     if run_ids:
         all_test_categories, all_test_entries_involved = load_test_entries_from_id_file(
@@ -83,7 +80,7 @@ def get_involved_test_entries(test_category_args, run_ids):
     else:
         all_test_categories = parse_test_category_argument(test_category_args)
         for test_category in all_test_categories:
-            all_test_entries_involved.extend(load_dataset_entry(test_category))
+            all_test_entries_involved.extend(load_dataset_entry(test_category, file_subpath))
 
     return (
         all_test_categories,
@@ -187,7 +184,7 @@ def multi_threaded_inference(handler, test_case, include_input_log, exclude_stat
             + traceback.format_exc(limit=10)
             + "-" * 100
         )
-        tqdm.write(error_block)
+        print(error_block)
 
         result = f"Error during inference: {str(e)}"
         metadata = {"traceback": traceback.format_exc()}
@@ -203,21 +200,18 @@ def multi_threaded_inference(handler, test_case, include_input_log, exclude_stat
 
 def generate_results(args, model_name, test_cases_total):
     handler = build_handler(model_name, args.temperature)
+    num_threads = args.num_threads
 
     if isinstance(handler, OSSHandler):
         handler: OSSHandler
         is_oss_model = True
         # For OSS models, if the user didn't explicitly set the number of threads,
         # we default to 100 threads to speed up the inference.
-        num_threads = (
-            args.num_threads
-            if args.num_threads is not None
-            else LOCAL_SERVER_MAX_CONCURRENT_REQUEST
-        )
+        if num_threads == 1:
+            num_threads = LOCAL_SERVER_MAX_CONCURRENT_REQUEST
     else:
         handler: BaseHandler
         is_oss_model = False
-        num_threads = args.num_threads if args.num_threads is not None else 1
 
     # Use a separate thread to write the results to the file to avoid concurrent IO issues
     def _writer():
@@ -267,14 +261,7 @@ def generate_results(args, model_name, test_cases_total):
         completed = set()
 
         with ThreadPoolExecutor(max_workers=num_threads) as pool, tqdm(
-            total=len(test_cases_total),
-            desc=f"Generating results for {model_name}",
-            position=0,         
-            leave=True,           
-            dynamic_ncols=True,   
-            mininterval=0.2,      
-            smoothing=0.1,        
-            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+            total=len(test_cases_total), desc=f"Generating results for {model_name}"
         ) as pbar:
 
             # seed initial ready tasks
@@ -341,8 +328,25 @@ def main(args):
     # limit all OpenMP/MKL threads to 1
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["MKL_NUM_THREADS"] = "1"
+
+    os.environ["OPENAI_BASE_URL"] = args.openai_base_url
+    os.environ["OPENAI_API_KEY"] = args.openai_api_key
+    os.environ["VLLM_MODEL_NAME"] = args.vllm_model_name
+
+    os.environ["USER_PROMPT_LANG"] = args.user_prompt_lang
+    os.environ["FUNC_DESC_LANG"] = args.func_desc_lang
+    os.environ["FUNC_PARAM_DESC_LANG"] = args.func_param_desc_lang
+
     # use spawn method for multiprocessing
     mp.set_start_method("spawn", force=True)
+
+    files_subpath = create_files_subpath(os.environ["USER_PROMPT_LANG"], 
+                                         os.environ["FUNC_DESC_LANG"], 
+                                         os.environ["FUNC_PARAM_DESC_LANG"])
+    result_subpath = create_files_subpath(os.environ["USER_PROMPT_LANG"], 
+                                          os.environ["FUNC_DESC_LANG"], 
+                                          os.environ["FUNC_PARAM_DESC_LANG"],
+                                          os.environ["SYSTEM_PROMPT_LANG"])
 
     if type(args.model) is not list:
         args.model = [args.model]
@@ -352,7 +356,7 @@ def main(args):
     (
         all_test_categories,
         all_test_entries_involved,
-    ) = get_involved_test_entries(args.test_category, args.run_ids)
+    ) = get_involved_test_entries(args.test_category, args.run_ids, files_subpath)
 
     for model_name in args.model:
         if model_name not in MODEL_CONFIG_MAPPING:
@@ -361,16 +365,16 @@ def main(args):
                 "• For officially supported models, please refer to `SUPPORTED_MODELS.md`.\n"
                 "• For running new models, please refer to `README.md` and `CONTRIBUTING.md`."
             )
-    tqdm.write(f"Generating results for {args.model}")
+    print(f"Generating results for {args.model}")
     if args.run_ids:
-        tqdm.write("Running specific test cases. Ignoring `--test-category` argument.")
+        print("Running specific test cases. Ignoring `--test-category` argument.")
     else:
-        tqdm.write(f"Running full test cases for categories: {all_test_categories}.")
+        print(f"Running full test cases for categories: {all_test_categories}.")
 
     if any(is_format_sensitivity(test_category) for test_category in all_test_categories):
         for model_name in args.model:
             if MODEL_CONFIG_MAPPING[model_name].is_fc_model:
-                tqdm.write(
+                print(
                     "⚠️ Warning: Format sensitivity test cases are only supported for prompting (non-FC) models. "
                     f"Since {model_name} is a FC model based on its config, the format sensitivity test cases will be skipped."
                 )
@@ -378,18 +382,19 @@ def main(args):
     if args.result_dir is not None:
         args.result_dir = PROJECT_ROOT / args.result_dir
     else:
-        args.result_dir = RESULT_PATH
+        # args.result_dir = RESULT_PATH
+        args.result_dir = RESULT_PATH / result_subpath
 
     for model_name in args.model:
         test_cases_total = collect_test_cases(
             args,
             model_name,
             all_test_categories,
-            all_test_entries_involved,
+            all_test_entries_involved
         )
 
         if len(test_cases_total) == 0:
-            tqdm.write(
+            print(
                 f"✅ All selected test cases have been previously generated for {model_name}. No new test cases to generate."
             )
         else:

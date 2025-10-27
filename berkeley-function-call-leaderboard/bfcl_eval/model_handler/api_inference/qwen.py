@@ -17,15 +17,8 @@ class QwenAPIHandler(OpenAICompletionsHandler):
 
     """
 
-    def __init__(
-        self,
-        model_name,
-        temperature,
-        registry_name,
-        is_fc_model,
-        **kwargs,
-    ) -> None:
-        super().__init__(model_name, temperature, registry_name, is_fc_model, **kwargs)
+    def __init__(self, model_name, temperature) -> None:
+        super().__init__(model_name, temperature)
         self.model_style = ModelStyle.OPENAI_COMPLETIONS
         self.client = OpenAI(
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -212,15 +205,8 @@ class QwenAPIHandler(OpenAICompletionsHandler):
 
 class QwenAgentThinkHandler(OpenAICompletionsHandler):
 
-    def __init__(
-        self,
-        model_name,
-        temperature,
-        registry_name,
-        is_fc_model,
-        **kwargs,
-    ) -> None:
-        super().__init__(model_name, temperature, registry_name, is_fc_model, **kwargs)
+    def __init__(self, model_name, temperature) -> None:
+        super().__init__(model_name, temperature)
         self.model_style = ModelStyle.OPENAI_COMPLETIONS
         """
         Note: Need to start vllm server first with command:
@@ -232,10 +218,10 @@ class QwenAgentThinkHandler(OpenAICompletionsHandler):
         """
         
         self.llm = get_chat_model({
-        'model': model_name,  # name of the model served by vllm server
+        'model': os.environ["VLLM_MODEL_NAME"],  # name of the model served by vllm server
         'model_type': 'oai',
-        'model_server':'http://localhost:8000/v1', # can be replaced with server host
-        'api_key': "none",
+        'model_server': os.environ["OPENAI_BASE_URL"], # can be replaced with server host
+        'api_key': os.environ["OPENAI_API_KEY"],
         'generate_cfg': {
             'fncall_prompt_type': 'nous',
             'extra_body': {
@@ -243,14 +229,14 @@ class QwenAgentThinkHandler(OpenAICompletionsHandler):
                     'enable_thinking': True
                 }
             },
-            "thought_in_content": True,
+            "thought_in_content": False,
             'temperature': 0.6,
             'top_p': 0.95,
             'top_k': 20,
             'repetition_penalty': 1.0,
             'presence_penalty': 0.0,
             'max_input_tokens': 58000,
-            'timeout': 1000,
+            'timeout': 7200,
             'max_tokens': 16384
         }
     })

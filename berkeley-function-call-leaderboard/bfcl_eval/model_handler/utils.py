@@ -717,7 +717,7 @@ def format_function_doc(functions: list[dict], function_doc_format: str) -> str:
         functions = _generate_function_doc_python(functions)
 
     elif function_doc_format == "json":
-        functions = json.dumps(functions, indent=4)
+        functions = json.dumps(functions, ensure_ascii=False, indent=4)
 
     else:
         raise ValueError(f"Invalid function doc format: {function_doc_format}")

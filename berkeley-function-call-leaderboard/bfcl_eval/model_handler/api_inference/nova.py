@@ -16,15 +16,8 @@ from bfcl_eval.model_handler.utils import (
 
 
 class NovaHandler(BaseHandler):
-    def __init__(
-        self,
-        model_name,
-        temperature,
-        registry_name,
-        is_fc_model,
-        **kwargs,
-    ) -> None:
-        super().__init__(model_name, temperature, registry_name, is_fc_model, **kwargs)
+    def __init__(self, model_name, temperature) -> None:
+        super().__init__(model_name, temperature)
         self.model_style = ModelStyle.AMAZON
         self.is_fc_model = True
         _session = boto3.Session(
@@ -70,8 +63,7 @@ class NovaHandler(BaseHandler):
         if len(tools) > 0:
             # toolConfig requires minimum number of 1 item.
             return self.generate_with_backoff(
-                # modelId=f"us.amazon.{self.model_name.replace('.', ':')}",
-                modelId=self.model_name,
+                modelId=f"us.amazon.{self.model_name.replace('.', ':')}",
                 messages=message,
                 system=system_prompt,
                 inferenceConfig={"temperature": self.temperature},
@@ -79,7 +71,7 @@ class NovaHandler(BaseHandler):
             )
         else:
             return self.generate_with_backoff(
-                modelId=self.model_name,
+                modelId=f"us.amazon.{self.model_name.replace('.', ':')}",
                 messages=message,
                 system=system_prompt,
                 inferenceConfig={"temperature": self.temperature},

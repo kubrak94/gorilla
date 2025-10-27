@@ -26,15 +26,8 @@ from google.genai.types import (
 
 
 class GeminiHandler(BaseHandler):
-    def __init__(
-        self,
-        model_name,
-        temperature,
-        registry_name,
-        is_fc_model,
-        **kwargs,
-    ) -> None:
-        super().__init__(model_name, temperature, registry_name, is_fc_model, **kwargs)
+    def __init__(self, model_name, temperature) -> None:
+        super().__init__(model_name, temperature)
         self.model_style = ModelStyle.GOOGLE
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
@@ -55,7 +48,7 @@ class GeminiHandler(BaseHandler):
         return prompts
 
     def decode_ast(self, result, language, has_tool_call_tag):
-        if not self.is_fc_model:
+        if "FC" not in self.model_name:
             result = result.replace("```tool_code\n", "").replace("\n```", "")
             return default_decode_ast_prompting(result, language, has_tool_call_tag)
         else:
@@ -64,7 +57,7 @@ class GeminiHandler(BaseHandler):
             return result
 
     def decode_execute(self, result, has_tool_call_tag):
-        if not self.is_fc_model:
+        if "FC" not in self.model_name:
             result = result.replace("```tool_code\n", "").replace("\n```", "")
             return default_decode_execute_prompting(result, has_tool_call_tag)
         else:
@@ -108,7 +101,7 @@ class GeminiHandler(BaseHandler):
             config.tools = [Tool(function_declarations=inference_data["tools"])]
 
         return self.generate_with_backoff(
-            model=self.model_name,
+            model=self.model_name.replace("-FC", ""),
             contents=inference_data["message"],
             config=config,
         )
@@ -255,7 +248,7 @@ class GeminiHandler(BaseHandler):
             config.system_instruction = inference_data["system_prompt"]
 
         api_response = self.generate_with_backoff(
-            model=self.model_name,
+            model=self.model_name.replace("-FC", ""),
             contents=inference_data["message"],
             config=config,
         )

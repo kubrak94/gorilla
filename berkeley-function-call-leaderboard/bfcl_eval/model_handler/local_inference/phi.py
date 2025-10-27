@@ -3,16 +3,8 @@ from overrides import override
 
 
 class PhiHandler(OSSHandler):
-    def __init__(
-        self,
-        model_name,
-        temperature,
-        registry_name,
-        is_fc_model,
-        dtype="bfloat16",
-        **kwargs,
-    ) -> None:
-        super().__init__(model_name, temperature, registry_name, is_fc_model, **kwargs)
+    def __init__(self, model_name, temperature) -> None:
+        super().__init__(model_name, temperature)
 
     @override
     def decode_ast(self, result, language, has_tool_call_tag):

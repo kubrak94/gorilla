@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+import httpx
+
 import requests
 from bfcl_eval.constants.enums import ModelStyle
 from bfcl_eval.constants.eval_config import LOCAL_SERVER_PORT
@@ -20,16 +22,8 @@ from overrides import EnforceOverrides, final, override
 
 
 class OSSHandler(BaseHandler, EnforceOverrides):
-    def __init__(
-        self,
-        model_name,
-        temperature,
-        registry_name,
-        is_fc_model,
-        dtype="bfloat16",
-        **kwargs,
-    ) -> None:
-        super().__init__(model_name, temperature, registry_name, is_fc_model, **kwargs)
+    def __init__(self, model_name, temperature, dtype="bfloat16") -> None:
+        super().__init__(model_name, temperature)
         self.model_name_huggingface = model_name
         self.model_style = ModelStyle.OSSMODEL
         self.dtype = dtype
@@ -39,11 +33,18 @@ class OSSHandler(BaseHandler, EnforceOverrides):
         self.model_path_or_id = None
 
         # Read from env vars with fallbacks
-        self.local_server_endpoint = os.getenv("LOCAL_SERVER_ENDPOINT", "localhost")
-        self.local_server_port = os.getenv("LOCAL_SERVER_PORT", LOCAL_SERVER_PORT)
+        self.vllm_host = os.getenv("VLLM_ENDPOINT", "localhost")
+        self.vllm_port = os.getenv("VLLM_PORT", 1053)
 
-        self.base_url = f"http://{self.local_server_endpoint}:{self.local_server_port}/v1"
-        self.client = OpenAI(base_url=self.base_url, api_key="EMPTY")
+        if os.getenv("OPENAI_BASE_URL", False):
+            self.base_url = os.getenv("OPENAI_BASE_URL")
+        else:
+            self.base_url = f"http://{self.vllm_host}:{self.vllm_port}/v1"
+
+        self.api_key = os.getenv("OPENAI_API_KEY", "EMPTY")
+        
+        self.client = OpenAI(base_url=self.base_url, api_key=self.api_key, 
+                             http_client=httpx.Client(trust_env=False, verify=False))
 
     @override
     def inference(
@@ -110,6 +111,8 @@ class OSSHandler(BaseHandler, EnforceOverrides):
                 "pretrained_model_name_or_path": self.model_path_or_id,
                 "trust_remote_code": True,
             }
+
+            self.model_path_or_id = os.getenv("VLLM_MODEL_NAME", self.model_name_huggingface)
 
         self.tokenizer = AutoTokenizer.from_pretrained(**load_kwargs)
         config = AutoConfig.from_pretrained(**load_kwargs)
@@ -220,7 +223,11 @@ class OSSHandler(BaseHandler, EnforceOverrides):
                     )
                 try:
                     # Make a simple request to check if the server is up
-                    response = requests.get(f"{self.base_url}/models")
+                    if self.api_key == 'EMPTY':
+                        headers = None
+                    else:
+                        headers = {'Authorization': f'Bearer {self.api_key}'}
+                    response = requests.get(f"{self.base_url}/models", verify=False, headers=headers)
                     if response.status_code == 200:
                         server_ready = True
                         print("server is ready!")

@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from typing import Any
 
@@ -7,18 +8,25 @@ from bfcl_eval.model_handler.utils import convert_to_function_call
 from overrides import override
 
 
+QWEN_PROMPT_FORMAT = {
+    "en": {
+        "first": "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+        "second": '\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call><|im_end|>\n'
+    },
+    "ar": {
+        "first": "# الأدوات\n\nيمكنك استدعاء وظيفة واحدة أو أكثر للمساعدة في استعلام المستخدم.\n\nيتم تزويدك بتواقيع الوظائف داخل علامات <tools></tools> XML:\n<tools>",
+        "second": '\n</tools>\n\nلكل استدعاء وظيفة، قم بإرجاع كائن json باسم الوظيفة والوسائط داخل علامات <tool_call></tool_call> XML:\n<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call><|im_end|>\n'
+    }
+}
+
+QWEN_PROMPT_FORMAT = QWEN_PROMPT_FORMAT[os.environ["SYSTEM_PROMPT_LANG"]]
+
+
 class QwenFCHandler(OSSHandler):
-    def __init__(
-        self,
-        model_name,
-        temperature,
-        registry_name,
-        is_fc_model,
-        dtype="bfloat16",
-        **kwargs,
-    ) -> None:
-        super().__init__(model_name, temperature, registry_name, is_fc_model, **kwargs)
-        self.model_name_huggingface = model_name
+    def __init__(self, model_name, temperature) -> None:
+        super().__init__(model_name, temperature)
+        self.is_fc_model = True
+        self.model_name_huggingface = model_name.replace("-FC", "")
 
     @override
     def decode_ast(self, result, language, has_tool_call_tag):
